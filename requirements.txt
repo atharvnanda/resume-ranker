@@ -1,0 +1,10 @@
+streamlit
+groq
+pdfplumber
+pydantic
+sentence-transformers
+scikit-learn
+python-dotenv
+rapidfuzz
+pandas
+openpyxl
