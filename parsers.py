@@ -91,9 +91,16 @@ Given raw resume text, extract the following as a JSON object — nothing else.
   "certifications": ["AWS SAA", "PMP"]
 }
 
-Rules:
+CRITICAL rules for skill extraction:
+- Extract EVERY technology, tool, language, framework, library, database, concept, and methodology mentioned ANYWHERE in the resume — not just the skills section.
+- Scan the summary, experience bullets, project descriptions, and education for skills.
+- Include both specific tools AND general concepts (e.g. "MySQL", "SQL", "system design", "API design", "REST APIs", "authentication", "microservices", "Redux", "Docker").
+- If a responsibility says "built REST APIs with JWT authentication", extract: "REST APIs", "JWT", "authentication".
+- If it says "used Redux for state management", extract: "Redux", "state management".
+- Do NOT collapse related skills — list them individually (e.g. list both "SQL" and "MySQL" if both are implied).
+
+Other rules:
 - Calculate total_experience_years by summing durations. Estimate if only dates given.
-- Extract ALL skills mentioned anywhere (summary, experience bullets, skills section).
 - If data is missing or ambiguous, use the default (null, 0, empty list).
 - Do NOT fabricate information not present in the text.
 """

@@ -75,22 +75,60 @@ class Embedder:
 
 # ── Skill Matching ───────────────────────────────────────────────────────
 
+def _substring_match(required: str, candidate_skill: str) -> bool:
+    """Check if one string contains the other (catches sql ⊂ mysql, api ⊂ api design)."""
+    req = required.lower().strip()
+    cand = candidate_skill.lower().strip()
+    # Either direction: "sql" in "mysql" or "rest api" in "rest apis"
+    return req in cand or cand in req
+
+
+def build_search_pool(candidate) -> list[str]:
+    """
+    Build a broad pool of matchable strings from a candidate profile.
+    Includes skills, certifications, responsibilities, titles, and raw text fragments.
+    This ensures we don't miss skills the LLM forgot to extract.
+    """
+    pool = list(candidate.skills)
+    pool += candidate.certifications
+    pool += [exp.title for exp in candidate.experience if exp.title]
+    for exp in candidate.experience:
+        pool += exp.responsibilities
+    # Add raw text split into meaningful chunks (lines) as fallback
+    if candidate.raw_text:
+        lines = [line.strip() for line in candidate.raw_text.split("\n") if len(line.strip()) > 10]
+        pool += lines
+    return pool
+
+
 def skill_matches(required: str, candidate_skills: list[str], embedder: Embedder) -> bool:
     """
     Check if a required skill is present in the candidate's skill list.
-    Uses fuzzy string matching first (fast), then semantic similarity as fallback.
+    Three-layer matching:
+      1. Substring containment (sql ⊂ mysql, api ⊂ rest api)
+      2. Fuzzy string match (React vs React.js vs ReactJS)
+      3. Semantic similarity fallback (CI/CD vs Jenkins pipelines)
     """
     req_lower = required.lower().strip()
+    if not candidate_skills:
+        return False
 
-    # 1. Fuzzy string match (handles React vs React.js vs ReactJS)
     for skill in candidate_skills:
-        if fuzz.token_sort_ratio(req_lower, skill.lower().strip()) >= config.FUZZY_MATCH_THRESHOLD:
+        skill_lower = skill.lower().strip()
+        if not skill_lower:
+            continue
+
+        # 1. Substring containment (fast, catches sql/mysql, api/rest api)
+        if _substring_match(req_lower, skill_lower):
             return True
 
-    # 2. Semantic similarity fallback (handles "CI/CD" vs "Jenkins pipelines")
-    if candidate_skills:
-        score, _ = embedder.best_match_score(required, candidate_skills)
-        if score >= config.SIMILARITY_THRESHOLD:
+        # 2. Fuzzy string match (handles React vs React.js vs ReactJS)
+        if fuzz.token_sort_ratio(req_lower, skill_lower) >= config.FUZZY_MATCH_THRESHOLD:
             return True
+
+    # 3. Semantic similarity fallback (handles "CI/CD" vs "Jenkins pipelines")
+    score, _ = embedder.best_match_score(required, candidate_skills)
+    if score >= config.SIMILARITY_THRESHOLD:
+        return True
 
     return False

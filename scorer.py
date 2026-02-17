@@ -12,7 +12,7 @@ from models import (
     DimensionScore,
     FilterResult,
 )
-from utils import Embedder, skill_matches
+from utils import Embedder, skill_matches, build_search_pool
 
 
 # ── Hard Filter ──────────────────────────────────────────────────────────
@@ -77,9 +77,13 @@ def score_skills(
     if not required:
         return DimensionScore(score=100.0, evidence="No required skills specified")
 
+    # Search the broad pool (skills + certs + responsibilities + raw text lines)
+    # so we catch things the LLM missed extracting into the skills list
+    search_pool = build_search_pool(candidate)
+
     matched, missing = [], []
     for skill in required:
-        if skill_matches(skill, candidate.skills, embedder):
+        if skill_matches(skill, search_pool, embedder):
             matched.append(skill)
         else:
             missing.append(skill)
@@ -168,10 +172,12 @@ def score_preferred(
     if not all_preferred:
         return DimensionScore(score=100.0, evidence="No preferred criteria specified")
 
-    all_candidate = candidate.skills + candidate.certifications
+    # Search the broad pool, not just skills + certs
+    search_pool = build_search_pool(candidate)
+
     matched, missing = [], []
     for item in all_preferred:
-        if skill_matches(item, all_candidate, embedder):
+        if skill_matches(item, search_pool, embedder):
             matched.append(item)
         else:
             missing.append(item)

@@ -11,8 +11,8 @@ LLM_MAX_RETRIES = 3
 
 # --- Embeddings ---
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-SIMILARITY_THRESHOLD = 0.75  # minimum cosine similarity to count as a skill match
-FUZZY_MATCH_THRESHOLD = 80   # minimum rapidfuzz score (0-100) for string matching
+SIMILARITY_THRESHOLD = 0.55   # cosine similarity — lowered to catch related skills (sql/mysql, api design/rest apis)
+FUZZY_MATCH_THRESHOLD = 75    # rapidfuzz score — lowered to catch abbreviation variants
 
 # --- Scoring weights (defaults, HR can adjust in UI) ---
 DEFAULT_WEIGHTS = {
