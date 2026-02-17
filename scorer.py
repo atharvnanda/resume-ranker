@@ -17,7 +17,9 @@ from utils import Embedder, skill_matches
 
 # ── Hard Filter ──────────────────────────────────────────────────────────
 
-def apply_hard_filter(candidate: CandidateProfile, job: JobRequirements) -> FilterResult:
+def apply_hard_filter(
+    candidate: CandidateProfile, job: JobRequirements, embedder: Embedder
+) -> FilterResult:
     """Check if candidate meets ALL hard requirements. Fail fast."""
     failures: list[str] = []
 
@@ -43,10 +45,22 @@ def apply_hard_filter(candidate: CandidateProfile, job: JobRequirements) -> Filt
         if not has_degree:
             failures.append(f"Missing required degree: {job.hard.required_degree}")
 
-    # Custom musts (simple keyword check in raw text)
+    # Custom musts — semantic match against candidate's full profile
+    # (skills + raw text sentences) instead of exact substring
     for must in job.hard.custom_musts:
-        if must.lower() not in candidate.raw_text.lower():
-            failures.append(f"Missing hard requirement: {must}")
+        # Build a search pool: skills, certifications, and responsibilities
+        search_pool = (
+            candidate.skills
+            + candidate.certifications
+            + [resp for exp in candidate.experience for resp in exp.responsibilities]
+        )
+        if not skill_matches(must, search_pool, embedder):
+            # Fallback: also check if a reasonable substring exists in raw text
+            must_words = must.lower().split()
+            key_terms = [w for w in must_words if len(w) > 3]
+            raw_lower = candidate.raw_text.lower()
+            if not any(term in raw_lower for term in key_terms):
+                failures.append(f"Missing hard requirement: {must}")
 
     return FilterResult(passed=len(failures) == 0, failures=failures)
 
@@ -181,7 +195,7 @@ def evaluate_candidate(
     evaluation = CandidateEvaluation(candidate=candidate)
 
     # Hard filter
-    evaluation.filter_result = apply_hard_filter(candidate, job)
+    evaluation.filter_result = apply_hard_filter(candidate, job, embedder)
     if not evaluation.filter_result.passed:
         evaluation.summary = "Filtered out: " + "; ".join(evaluation.filter_result.failures)
         return evaluation

@@ -50,7 +50,11 @@ Extract the following fields as a JSON object — nothing else.
   }
 }
 
-Rules:
+CRITICAL routing rules — follow these exactly:
+- Any technology, tool, language, framework, or technical concept → required_skills (e.g. "React.js", "system design", "REST APIs", "Git").
+- Any mention of years of experience → min_experience_years (extract the number only). Do NOT put experience requirements in custom_musts.
+- Any degree requirement → required_degree.
+- custom_musts is ONLY for non-skill, non-experience, non-degree requirements like "must have work authorization" or "must pass background check". If nothing fits, leave it as an empty list.
 - Only include what is explicitly stated; don't invent requirements.
 - If a field isn't mentioned, use the default (empty list, 0, null).
 - Skills should be individual items (split "Python and Java" into two).
