@@ -81,6 +81,47 @@ class Embedder:
 
 # ── Skill Matching ───────────────────────────────────────────────────────
 
+# Common skill aliases: maps a required skill to alternative phrasings
+# that should also count as a match. This handles conceptual skills that
+# candidates describe differently than JDs.
+SKILL_ALIASES: dict[str, list[str]] = {
+    "system design":        ["system architecture", "software architecture", "architectural design", "high-level design", "hld"],
+    "web architecture":     ["system architecture", "software architecture", "web design patterns"],
+    "rest apis":            ["restful", "rest api", "api development", "api design", "web services", "http apis"],
+    "rest api":             ["restful", "rest apis", "api development", "api design", "web services", "http apis"],
+    "ci/cd":                ["ci cd", "cicd", "continuous integration", "continuous deployment", "jenkins", "github actions", "gitlab ci"],
+    "microservices":        ["micro services", "microservice architecture", "service-oriented", "soa"],
+    "version control":      ["git", "github", "gitlab", "bitbucket", "svn"],
+    "git":                  ["github", "gitlab", "bitbucket", "version control"],
+    "javascript":           ["js", "es6", "es6+", "ecmascript"],
+    "typescript":           ["ts"],
+    "node.js":              ["nodejs", "node js", "express.js", "expressjs", "express"],
+    "react.js":             ["reactjs", "react js", "react"],
+    "nosql":                ["mongodb", "dynamodb", "cassandra", "redis", "firestore", "couchdb", "no-sql"],
+    "sql":                  ["mysql", "postgresql", "postgres", "sqlite", "mssql", "sql server", "oracle db"],
+    "containerization":     ["docker", "containers", "podman", "container"],
+    "docker":               ["containerization", "containers", "dockerfile", "docker-compose"],
+    "cloud platforms":      ["aws", "gcp", "azure", "cloud computing", "cloud services"],
+    "aws":                  ["amazon web services", "ec2", "s3", "lambda", "cloud"],
+}
+
+
+def _check_aliases(required: str, candidate_skills: list[str]) -> bool:
+    """Check if any alias of the required skill appears in candidate skills."""
+    req_lower = required.lower().strip()
+    aliases = SKILL_ALIASES.get(req_lower, [])
+    if not aliases:
+        return False
+    for alias in aliases:
+        for skill in candidate_skills:
+            skill_lower = skill.lower().strip()
+            if not skill_lower:
+                continue
+            if alias in skill_lower or skill_lower in alias:
+                return True
+    return False
+
+
 def _substring_match(required: str, candidate_skill: str) -> bool:
     """Check if one string contains the other (catches sql ⊂ mysql, api ⊂ api design)."""
     req = required.lower().strip()
@@ -110,7 +151,8 @@ def build_search_pool(candidate) -> list[str]:
 def skill_matches(required: str, candidate_skills: list[str], embedder: Embedder) -> bool:
     """
     Check if a required skill is present in the candidate's skill list.
-    Three-layer matching:
+    Four-layer matching:
+      0. Alias expansion (system design → system architecture, etc.)
       1. Substring containment (sql ⊂ mysql, api ⊂ rest api)
       2. Fuzzy string match (React vs React.js vs ReactJS)
       3. Semantic similarity fallback (CI/CD vs Jenkins pipelines)
@@ -118,6 +160,10 @@ def skill_matches(required: str, candidate_skills: list[str], embedder: Embedder
     req_lower = required.lower().strip()
     if not candidate_skills:
         return False
+
+    # 0. Alias expansion (catches "system design" when resume says "system architecture")
+    if _check_aliases(required, candidate_skills):
+        return True
 
     for skill in candidate_skills:
         skill_lower = skill.lower().strip()

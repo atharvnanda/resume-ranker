@@ -258,18 +258,38 @@ def score_seniority(candidate: CandidateProfile, job: JobRequirements) -> Dimens
 
 def score_education(candidate: CandidateProfile, job: JobRequirements) -> DimensionScore:
     """Score based on education level."""
-    DEGREE_RANK = {"phd": 4, "doctorate": 4, "master": 3, "m.s.": 3, "m.a.": 3, "mba": 3,
-                   "bachelor": 2, "b.s.": 2, "b.a.": 2, "b.tech": 2, "b.e.": 2,
-                   "associate": 1, "diploma": 1, "high school": 0}
+    DEGREE_RANK = {
+        # Doctoral
+        "phd": 4, "ph.d": 4, "doctorate": 4, "doctoral": 4,
+        # Masters
+        "master": 4, "m.s.": 3, "m.s": 3, "ms ": 3, "m.a.": 3, "m.a": 3,
+        "mba": 3, "m.tech": 3, "m.e.": 3, "mca": 3, "m.sc": 3, "msc": 3,
+        # Bachelors
+        "bachelor": 2, "b.s.": 2, "b.s": 2, "bs ": 2, "b.a.": 2, "b.a": 2,
+        "b.tech": 2, "btech": 2, "b.e.": 2, "b.e": 2, "bca": 2,
+        "b.sc": 2, "bsc": 2, "b.com": 2, "bcom": 2,
+        # Associate / Diploma
+        "associate": 1, "diploma": 1,
+        # High school
+        "high school": 0, "12th": 0, "hsc": 0,
+    }
 
     best_rank = 0
     best_degree = "None"
     for edu in candidate.education:
-        deg_lower = edu.degree.lower()
+        deg_lower = edu.degree.lower().strip()
         for keyword, rank in DEGREE_RANK.items():
             if keyword in deg_lower and rank > best_rank:
                 best_rank = rank
                 best_degree = edu.degree
+
+    # Fallback: check raw text for degree mentions if LLM missed education
+    if best_rank == 0 and candidate.raw_text:
+        raw_lower = candidate.raw_text.lower()
+        for keyword, rank in DEGREE_RANK.items():
+            if keyword in raw_lower and rank > best_rank:
+                best_rank = rank
+                best_degree = f"(detected from resume text: {keyword})"
 
     score = min(best_rank * 33.3, 100.0)
     evidence = f"Highest: {best_degree}" if best_rank > 0 else "No education found"
