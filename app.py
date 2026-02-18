@@ -17,14 +17,14 @@ from scorer import rank_candidates
 st.set_page_config(page_title="Resume Ranker", page_icon="📄", layout="wide")
 
 
-# ── Cached Resources ────────────────────────────────────────────────────
+# ── Cached Resources (lazy — only loaded when user clicks Rank) ────────
 
-@st.cache_resource(show_spinner="Loading embedding model…")
+@st.cache_resource(show_spinner=False)
 def get_embedder() -> Embedder:
     return Embedder()
 
 
-@st.cache_resource(show_spinner="Connecting to Groq…")
+@st.cache_resource(show_spinner=False)
 def get_llm() -> LLM:
     return LLM()
 
@@ -41,14 +41,16 @@ with st.sidebar:
     st.header("⚙️ Settings")
 
     st.subheader("Scoring Weights")
-    w_skills = st.slider("Skills Depth", 0.0, 1.0, config.DEFAULT_WEIGHTS["skills_depth"], 0.05)
-    w_proj = st.slider("Project Relevance", 0.0, 1.0, config.DEFAULT_WEIGHTS["project_relevance"], 0.05)
+    w_cov = st.slider("Skills Coverage (deterministic)", 0.0, 1.0, config.DEFAULT_WEIGHTS["skills_coverage"], 0.05)
+    w_skills = st.slider("Skills Depth (LLM)", 0.0, 1.0, config.DEFAULT_WEIGHTS["skills_depth"], 0.05)
+    w_proj = st.slider("Project Relevance (LLM)", 0.0, 1.0, config.DEFAULT_WEIGHTS["project_relevance"], 0.05)
     w_exp = st.slider("Experience", 0.0, 1.0, config.DEFAULT_WEIGHTS["experience"], 0.05)
     w_sen = st.slider("Seniority", 0.0, 1.0, config.DEFAULT_WEIGHTS["seniority"], 0.05)
     w_edu = st.slider("Education", 0.0, 1.0, config.DEFAULT_WEIGHTS["education"], 0.05)
-    w_fit = st.slider("Overall Fit", 0.0, 1.0, config.DEFAULT_WEIGHTS["overall_fit"], 0.05)
+    w_fit = st.slider("Overall Fit (LLM)", 0.0, 1.0, config.DEFAULT_WEIGHTS["overall_fit"], 0.05)
 
     weights = {
+        "skills_coverage": w_cov,
         "skills_depth": w_skills,
         "project_relevance": w_proj,
         "experience": w_exp,
@@ -110,14 +112,16 @@ if st.button("🚀 Rank Candidates", type="primary", use_container_width=True):
         st.error("All scoring weights are zero. Adjust in the sidebar.")
         st.stop()
 
-    # Initialize resources
+    # Initialize resources (lazy — first run loads models, subsequent runs use cache)
     try:
-        llm = get_llm()
+        with st.spinner("Connecting to Groq…"):
+            llm = get_llm()
     except ValueError as e:
         st.error(str(e))
         st.stop()
 
-    embedder = get_embedder()
+    with st.spinner("Loading embedding model (first run only)…"):
+        embedder = get_embedder()
 
     # Step 1: Parse JD
     with st.spinner("Parsing job description…"):
@@ -175,7 +179,7 @@ if st.button("🚀 Rank Candidates", type="primary", use_container_width=True):
             "Status": "✅ Passed" if ev.filter_result.passed else "❌ Filtered",
         }
         # Add dimension scores
-        for dim in ("skills_depth", "project_relevance", "experience", "seniority", "education", "overall_fit"):
+        for dim in ("skills_coverage", "skills_depth", "project_relevance", "experience", "seniority", "education", "overall_fit"):
             if dim in ev.scores:
                 label = dim.replace("_", " ").title()
                 row[label] = round(ev.scores[dim].score, 1)
@@ -204,7 +208,35 @@ if st.button("🚀 Rank Candidates", type="primary", use_container_width=True):
         with st.expander(f"{status_icon} #{ev.rank} — {ev.candidate.name} ({ev.candidate.source_file}) — {ev.composite_score:.1f}/100"):
             if not ev.filter_result.passed:
                 st.error(f"**Filtered out:** {'; '.join(ev.filter_result.failures)}")
+                # Still show skills coverage if available
+                if "skills_coverage" in ev.scores:
+                    ds = ev.scores["skills_coverage"]
+                    st.markdown(f"**Skills Coverage:** {ds.score:.0f}% — {ds.evidence}")
+                    if ds.matched:
+                        st.markdown(f"✅ Found: {', '.join(ds.matched)}")
+                    if ds.missing:
+                        st.markdown(f"❌ Missing: {', '.join(ds.missing)}")
                 continue
+
+            # Deterministic skills coverage (with matched/missing breakdown)
+            st.markdown("#### 🎯 Skills Coverage (Deterministic)")
+            if "skills_coverage" in ev.scores:
+                ds = ev.scores["skills_coverage"]
+                st.markdown(f"**{ds.score:.0f}%** — {ds.evidence}")
+                st.progress(ds.score / 100)
+                col_m, col_x = st.columns(2)
+                with col_m:
+                    st.markdown("**✅ Found:**")
+                    for s in ds.matched:
+                        st.write(f"• {s}")
+                    if not ds.matched:
+                        st.write("• None")
+                with col_x:
+                    st.markdown("**❌ Missing:**")
+                    for s in ds.missing:
+                        st.write(f"• {s}")
+                    if not ds.missing:
+                        st.write("• None")
 
             # LLM-judged dimensions (with reasoning)
             st.markdown("#### 🤖 LLM Analysis")

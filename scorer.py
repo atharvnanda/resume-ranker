@@ -12,14 +12,15 @@ from models import (
     FilterResult,
     LLMJudgment,
 )
-from utils import LLM, Embedder, skill_matches, build_search_pool
+from utils import LLM, Embedder, skill_matches, build_search_pool, compute_skills_coverage
 
 
 # ── LLM Evaluation Prompt ────────────────────────────────────────────────
 
 EVAL_SYSTEM_PROMPT = """\
-You are a strict technical hiring evaluator. You will be given a job description and a candidate's resume.
-Evaluate the candidate on EXACTLY these three dimensions using the fixed rubrics below.
+You are a strict technical hiring evaluator. You will be given a job description, a candidate's resume, and a PRE-COMPUTED skills checklist showing which required skills were found or missing.
+
+Your job is to evaluate the candidate's DEPTH of demonstrated skill usage and project relevance — NOT to re-check whether skills are present (that's already done deterministically).
 
 Return a JSON object with this exact structure — nothing else:
 {
@@ -39,38 +40,42 @@ Return a JSON object with this exact structure — nothing else:
   "gaps": ["gap1", "gap2"]
 }
 
-═══ DIMENSION 1: skills_depth (How well does the candidate ACTUALLY know the required skills?) ═══
+═══ DIMENSION 1: skills_depth (How DEEPLY does the candidate demonstrate required skills?) ═══
 
-Measure these 4 factors, then average them into one score:
+IMPORTANT: You are given a pre-computed checklist of which required skills are PRESENT or MISSING.
+Use it as ground truth. Do NOT override it. A candidate missing 5 out of 9 required skills CANNOT score above 40.
 
-A. COVERAGE (0-25): What fraction of required skills appear in their resume?
-   - 25 = all required skills present
-   - 0 = none present
+Measure these 3 factors (since coverage is already computed separately):
 
-B. DEMONSTRATED USE (0-25): Are skills backed by real work, or just listed?
-   - 25 = every skill appears in project/work descriptions with specific outcomes
-   - 15 = most skills mentioned in context of actual work
-   - 5 = skills are only listed in a skills section with no supporting work
-   - 0 = skills not present at all
+A. DEMONSTRATED USE (0-35): Are the PRESENT skills backed by real work, or just listed?
+   - 35 = every present skill appears in project/work descriptions with specific outcomes
+   - 20 = most present skills mentioned in context of actual work
+   - 10 = skills are only listed in a skills section with no supporting work evidence
+   - 0 = skills not demonstrated at all
 
-C. DEPTH (0-25): Does their usage show surface-level or deep knowledge?
-   - 25 = advanced patterns (architecture decisions, optimization, scaling, mentoring others)
-   - 15 = solid intermediate use (built features, integrated systems, solved problems)
-   - 5 = basic use (tutorials, simple CRUD, coursework only)
-   - 0 = no evidence of actual use
+B. DEPTH (0-35): For the skills that ARE present, does usage show surface-level or deep knowledge?
+   - 35 = advanced patterns (architecture decisions, performance optimization, scaling, leading teams)
+   - 20 = solid intermediate use (built features end-to-end, integrated systems, solved real problems)
+   - 10 = basic use (tutorials, simple CRUD, academic coursework only)
+   - 0 = no evidence of actual hands-on use
 
-D. RECENCY (0-25): Were skills used in recent roles or only years ago?
-   - 25 = used in current/most recent role
-   - 15 = used in last 2-3 years
-   - 5 = used only in older roles (3+ years ago)
+C. RECENCY (0-30): Were the present skills used in recent roles?
+   - 30 = used in current/most recent role
+   - 20 = used in last 2-3 years
+   - 10 = used only in older roles (3+ years ago)
    - 0 = cannot determine when used
 
-═══ DIMENSION 2: project_relevance (How relevant are their projects to THIS specific job?) ═══
+CRITICAL: If the skills checklist shows many required skills MISSING, this dimension MUST score low.
+A candidate missing Node.js and Python for a Full Stack role requiring both CANNOT score above 30 on skills_depth.
+
+═══ DIMENSION 2: project_relevance (How relevant is their ACTUAL WORK to THIS specific job?) ═══
+
+"Projects" includes work done at previous employers, side projects, open-source contributions — any demonstrated work.
 
 Measure these 4 factors, then average them into one score:
 
 A. DOMAIN MATCH (0-25): Does their project domain match the job's domain?
-   - 25 = same domain (e.g. both are fintech, both are e-commerce)
+   - 25 = same domain (e.g. both are web apps, both are fintech)
    - 15 = related domain
    - 5 = different but transferable
    - 0 = completely unrelated
@@ -79,7 +84,7 @@ B. TECH STACK OVERLAP (0-25): Do their projects use the same technologies the jo
    - 25 = projects use most/all of the required tech stack
    - 15 = projects use some of the required tech stack
    - 5 = projects use different but related technologies
-   - 0 = no overlap
+   - 0 = no overlap at all
 
 C. COMPLEXITY (0-25): How complex are their projects?
    - 25 = production systems, multi-service architectures, real user traffic
@@ -95,20 +100,26 @@ D. IMPACT (0-25): Did the projects produce measurable results?
 
 ═══ DIMENSION 3: overall_fit (Holistic assessment as a tiebreaker) ═══
 
-Consider everything together — skills, projects, experience trajectory, preferred/nice-to-have criteria, certifications.
-Score 0-100 for how well this candidate would perform in this specific role.
+Consider everything together — skills coverage (from the checklist), depth, projects, experience trajectory, preferred/nice-to-have criteria, certifications.
+Score 0-100. This should roughly correlate with the other scores — do NOT give a high overall_fit if skills_depth and project_relevance are low.
 
 ═══ RULES ═══
 - Base scores ONLY on what is explicitly written in the resume. Do NOT assume or infer skills not mentioned.
-- If a skill is only listed but never demonstrated in projects or work, score it under DEMONSTRATED USE as 5, not 25.
-- Be consistent: two candidates with identical evidence must get identical scores.
+- If a required skill is MISSING from the checklist, treat it as genuinely absent — do not give credit for it.
+- If a skill is only listed but never demonstrated in projects or work, score it under DEMONSTRATED USE as 10, not 35.
+- Be harsh and consistent: a frontend-only developer applying for a full-stack role with Node.js + Python required should score LOW on skills_depth if those backend skills are missing.
 - strengths: list 2-4 specific things that make this candidate stand out for THIS role.
 - gaps: list 2-4 specific things missing or weak relative to THIS role's requirements.
 """
 
 
-def _build_eval_prompt(candidate: CandidateProfile, job: JobRequirements) -> str:
-    """Build the user prompt for LLM evaluation."""
+def _build_eval_prompt(
+    candidate: CandidateProfile,
+    job: JobRequirements,
+    matched_skills: list[str],
+    missing_skills: list[str],
+) -> str:
+    """Build the user prompt for LLM evaluation, including pre-computed skills checklist."""
     # Format JD requirements concisely
     jd_section = f"""JOB: {job.title} ({job.seniority_level} level)
 Summary: {job.summary}
@@ -117,18 +128,31 @@ Min experience: {job.hard.min_experience_years} years
 Preferred skills: {', '.join(job.preferred.preferred_skills) or 'None'}
 Preferred certs: {', '.join(job.preferred.preferred_certifications) or 'None'}"""
 
+    # Pre-computed skills checklist — the LLM must treat this as ground truth
+    total = len(matched_skills) + len(missing_skills)
+    checklist = f"""
+═══ PRE-COMPUTED SKILLS CHECKLIST ({len(matched_skills)}/{total} required skills found) ═══
+✅ FOUND: {', '.join(matched_skills) if matched_skills else 'None'}
+❌ MISSING: {', '.join(missing_skills) if missing_skills else 'None'}
+(This checklist was computed deterministically. Treat it as ground truth.)"""
+
     # Send the full resume text — let the LLM read everything
     return f"""{jd_section}
+{checklist}
 
 ═══ CANDIDATE RESUME ═══
 {candidate.raw_text}"""
 
 
 def llm_evaluate(
-    candidate: CandidateProfile, job: JobRequirements, llm: LLM
+    candidate: CandidateProfile,
+    job: JobRequirements,
+    llm: LLM,
+    matched_skills: list[str],
+    missing_skills: list[str],
 ) -> LLMJudgment:
     """Ask the LLM to evaluate a candidate against the JD. Returns structured judgment."""
-    prompt = _build_eval_prompt(candidate, job)
+    prompt = _build_eval_prompt(candidate, job, matched_skills, missing_skills)
     try:
         data = llm.extract_json(EVAL_SYSTEM_PROMPT, prompt)
         return LLMJudgment(**data)
@@ -139,7 +163,10 @@ def llm_evaluate(
 # ── Hard Filter ──────────────────────────────────────────────────────────
 
 def apply_hard_filter(
-    candidate: CandidateProfile, job: JobRequirements, embedder: Embedder
+    candidate: CandidateProfile,
+    job: JobRequirements,
+    embedder: Embedder,
+    skills_coverage_pct: float = 100.0,
 ) -> FilterResult:
     """Check if candidate meets ALL hard requirements. Fail fast."""
     failures: list[str] = []
@@ -162,6 +189,13 @@ def apply_hard_filter(
         )
         if not has_degree:
             failures.append(f"Missing required degree: {job.hard.required_degree}")
+
+    # Check required skills coverage threshold
+    if skills_coverage_pct < config.REQUIRED_SKILLS_FAIL_THRESHOLD * 100:
+        failures.append(
+            f"Skills coverage {skills_coverage_pct:.0f}% "
+            f"< minimum {config.REQUIRED_SKILLS_FAIL_THRESHOLD * 100:.0f}%"
+        )
 
     for must in job.hard.custom_musts:
         search_pool = (
@@ -251,26 +285,38 @@ def evaluate_candidate(
     llm: LLM,
     weights: dict[str, float] | None = None,
 ) -> CandidateEvaluation:
-    """Run the full evaluation: filter → rule scores → LLM judgment → combine."""
+    """Run the full evaluation: skills coverage → filter → rule scores → LLM judgment → combine."""
     weights = weights or config.DEFAULT_WEIGHTS
 
     evaluation = CandidateEvaluation(candidate=candidate)
 
-    # Hard filter
-    evaluation.filter_result = apply_hard_filter(candidate, job, embedder)
+    # Step 0: Deterministic skills coverage (runs before everything else)
+    search_pool = build_search_pool(candidate)
+    coverage_pct, matched_skills, missing_skills = compute_skills_coverage(
+        job.hard.required_skills, search_pool, embedder
+    )
+    evaluation.scores["skills_coverage"] = DimensionScore(
+        score=coverage_pct,
+        evidence=f"{len(matched_skills)}/{len(matched_skills) + len(missing_skills)} required skills found",
+        matched=matched_skills,
+        missing=missing_skills,
+    )
+
+    # Hard filter (now includes skills coverage check)
+    evaluation.filter_result = apply_hard_filter(candidate, job, embedder, coverage_pct)
     if not evaluation.filter_result.passed:
         evaluation.summary = "Filtered out: " + "; ".join(evaluation.filter_result.failures)
         return evaluation
 
     # Rule-based scores
-    evaluation.scores = {
+    evaluation.scores.update({
         "experience": score_experience(candidate, job),
         "seniority":  score_seniority(candidate, job),
         "education":  score_education(candidate, job),
-    }
+    })
 
-    # LLM judgment
-    judgment = llm_evaluate(candidate, job, llm)
+    # LLM judgment (receives pre-computed skills checklist to ground its evaluation)
+    judgment = llm_evaluate(candidate, job, llm, matched_skills, missing_skills)
     evaluation.llm_judgment = judgment
     evaluation.scores["skills_depth"] = judgment.skills_depth
     evaluation.scores["project_relevance"] = judgment.project_relevance

@@ -5,7 +5,7 @@ load_dotenv()
 
 # --- Groq API ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = "openai/gpt-oss-120b"       # 120B, 500 tok/s — used for parsing + evaluation
 LLM_TEMPERATURE = 0
 LLM_MAX_RETRIES = 3
 
@@ -16,13 +16,17 @@ FUZZY_MATCH_THRESHOLD = 75    # rapidfuzz score — lowered to catch abbreviatio
 
 # --- Scoring weights (defaults, HR can adjust in UI) ---
 DEFAULT_WEIGHTS = {
-    "skills_depth":       0.30,
-    "project_relevance":  0.25,
-    "experience":         0.20,
-    "seniority":          0.10,
-    "education":          0.10,
-    "overall_fit":        0.05,
+    "skills_coverage":    0.25,   # deterministic: what fraction of required skills are present
+    "skills_depth":       0.20,   # LLM: how deeply are skills demonstrated
+    "project_relevance":  0.20,   # LLM: how relevant is their work to this role
+    "experience":         0.15,
+    "seniority":          0.05,
+    "education":          0.05,
+    "overall_fit":        0.10,
 }
+
+# --- Hard filter ---
+REQUIRED_SKILLS_FAIL_THRESHOLD = 0.4  # fail if candidate matches fewer than 40% of required skills
 
 # --- Upload limits ---
 MAX_FILE_SIZE_MB = 10

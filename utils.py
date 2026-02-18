@@ -132,3 +132,31 @@ def skill_matches(required: str, candidate_skills: list[str], embedder: Embedder
         return True
 
     return False
+
+
+# ── Deterministic Skills Coverage ────────────────────────────────────────
+
+def compute_skills_coverage(
+    required_skills: list[str],
+    candidate_pool: list[str],
+    embedder: Embedder,
+) -> tuple[float, list[str], list[str]]:
+    """
+    Check each required skill against the full candidate pool.
+    Returns (score 0-100, matched_skills, missing_skills).
+    Purely deterministic — no LLM involved.
+    """
+    if not required_skills:
+        return 100.0, [], []
+
+    matched: list[str] = []
+    missing: list[str] = []
+
+    for skill in required_skills:
+        if skill_matches(skill, candidate_pool, embedder):
+            matched.append(skill)
+        else:
+            missing.append(skill)
+
+    score = (len(matched) / len(required_skills)) * 100.0
+    return score, matched, missing
