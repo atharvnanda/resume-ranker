@@ -87,6 +87,15 @@ class DimensionScore(SafeBase):
     missing: list[str] = Field(default_factory=list)    # what didn't
 
 
+class LLMJudgment(SafeBase):
+    """Structured output from the LLM-as-judge evaluation."""
+    skills_depth: DimensionScore = Field(default_factory=DimensionScore)
+    project_relevance: DimensionScore = Field(default_factory=DimensionScore)
+    overall_fit: DimensionScore = Field(default_factory=DimensionScore)
+    strengths: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+
 class FilterResult(SafeBase):
     passed: bool = True
     failures: list[str] = Field(default_factory=list)  # reasons for failure
@@ -96,6 +105,7 @@ class CandidateEvaluation(SafeBase):
     candidate: CandidateProfile
     filter_result: FilterResult = Field(default_factory=FilterResult)
     scores: dict[str, DimensionScore] = Field(default_factory=dict)
+    llm_judgment: LLMJudgment = Field(default_factory=LLMJudgment)
     composite_score: float = 0.0
     strengths: list[str] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)

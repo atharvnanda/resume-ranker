@@ -16,11 +16,12 @@ FUZZY_MATCH_THRESHOLD = 75    # rapidfuzz score — lowered to catch abbreviatio
 
 # --- Scoring weights (defaults, HR can adjust in UI) ---
 DEFAULT_WEIGHTS = {
-    "skills":     0.35,
-    "experience": 0.30,
-    "seniority":  0.15,
-    "education":  0.10,
-    "preferred":  0.10,
+    "skills_depth":       0.30,
+    "project_relevance":  0.25,
+    "experience":         0.20,
+    "seniority":          0.10,
+    "education":          0.10,
+    "overall_fit":        0.05,
 }
 
 # --- Upload limits ---

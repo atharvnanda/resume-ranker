@@ -41,18 +41,20 @@ with st.sidebar:
     st.header("⚙️ Settings")
 
     st.subheader("Scoring Weights")
-    w_skills = st.slider("Skills", 0.0, 1.0, config.DEFAULT_WEIGHTS["skills"], 0.05)
+    w_skills = st.slider("Skills Depth", 0.0, 1.0, config.DEFAULT_WEIGHTS["skills_depth"], 0.05)
+    w_proj = st.slider("Project Relevance", 0.0, 1.0, config.DEFAULT_WEIGHTS["project_relevance"], 0.05)
     w_exp = st.slider("Experience", 0.0, 1.0, config.DEFAULT_WEIGHTS["experience"], 0.05)
     w_sen = st.slider("Seniority", 0.0, 1.0, config.DEFAULT_WEIGHTS["seniority"], 0.05)
     w_edu = st.slider("Education", 0.0, 1.0, config.DEFAULT_WEIGHTS["education"], 0.05)
-    w_pref = st.slider("Preferred", 0.0, 1.0, config.DEFAULT_WEIGHTS["preferred"], 0.05)
+    w_fit = st.slider("Overall Fit", 0.0, 1.0, config.DEFAULT_WEIGHTS["overall_fit"], 0.05)
 
     weights = {
-        "skills": w_skills,
+        "skills_depth": w_skills,
+        "project_relevance": w_proj,
         "experience": w_exp,
         "seniority": w_sen,
         "education": w_edu,
-        "preferred": w_pref,
+        "overall_fit": w_fit,
     }
 
     # Validate weights sum > 0
@@ -154,8 +156,8 @@ if st.button("🚀 Rank Candidates", type="primary", use_container_width=True):
         st.warning(f"{len(unparseable)} resume(s) could not be parsed: {', '.join(c.source_file for c in unparseable)}")
 
     # Step 3: Rank
-    with st.spinner("Scoring and ranking candidates…"):
-        results = rank_candidates(candidates, job, embedder, weights)
+    with st.spinner("Evaluating candidates (LLM analysis + rule-based scoring)…"):
+        results = rank_candidates(candidates, job, embedder, llm, weights)
 
     # ── Results ──────────────────────────────────────────────────────────
 
@@ -173,11 +175,13 @@ if st.button("🚀 Rank Candidates", type="primary", use_container_width=True):
             "Status": "✅ Passed" if ev.filter_result.passed else "❌ Filtered",
         }
         # Add dimension scores
-        for dim in ("skills", "experience", "seniority", "education", "preferred"):
+        for dim in ("skills_depth", "project_relevance", "experience", "seniority", "education", "overall_fit"):
             if dim in ev.scores:
-                row[dim.capitalize()] = round(ev.scores[dim].score, 1)
+                label = dim.replace("_", " ").title()
+                row[label] = round(ev.scores[dim].score, 1)
             else:
-                row[dim.capitalize()] = "—"
+                label = dim.replace("_", " ").title()
+                row[label] = "—"
         table_data.append(row)
 
     df = pd.DataFrame(table_data)
@@ -202,22 +206,36 @@ if st.button("🚀 Rank Candidates", type="primary", use_container_width=True):
                 st.error(f"**Filtered out:** {'; '.join(ev.filter_result.failures)}")
                 continue
 
-            # Score bars
-            for dim, ds in ev.scores.items():
-                st.markdown(f"**{dim.capitalize()}** — {ds.evidence}")
-                st.progress(ds.score / 100)
-                if ds.matched:
-                    st.caption(f"  ✅ Matched: {', '.join(ds.matched)}")
-                if ds.missing:
-                    st.caption(f"  ❌ Missing: {', '.join(ds.missing)}")
+            # LLM-judged dimensions (with reasoning)
+            st.markdown("#### 🤖 LLM Analysis")
+            for dim in ("skills_depth", "project_relevance", "overall_fit"):
+                if dim in ev.scores:
+                    ds = ev.scores[dim]
+                    label = dim.replace("_", " ").title()
+                    st.markdown(f"**{label}** — {ds.score:.0f}/100")
+                    st.progress(ds.score / 100)
+                    if ds.evidence:
+                        st.caption(ds.evidence)
+
+            # Rule-based dimensions
+            st.markdown("#### 📏 Rule-Based Scores")
+            for dim in ("experience", "seniority", "education"):
+                if dim in ev.scores:
+                    ds = ev.scores[dim]
+                    st.markdown(f"**{dim.capitalize()}** — {ds.evidence}")
+                    st.progress(ds.score / 100)
 
             st.divider()
             col_s, col_g = st.columns(2)
             with col_s:
-                st.markdown("**Strengths**")
+                st.markdown("**💪 Strengths**")
                 for s in ev.strengths:
                     st.write(f"• {s}")
+                if not ev.strengths:
+                    st.write("• None identified")
             with col_g:
-                st.markdown("**Gaps**")
+                st.markdown("**⚠️ Gaps**")
                 for g in ev.gaps:
                     st.write(f"• {g}")
+                if not ev.gaps:
+                    st.write("• None identified")
