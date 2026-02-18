@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import time
+import logging
 
 from groq import Groq
 from sentence_transformers import SentenceTransformer
@@ -9,6 +10,8 @@ from rapidfuzz import fuzz
 import numpy as np
 
 import config
+
+logger = logging.getLogger(__name__)
 
 
 # ── LLM Client ──────────────────────────────────────────────────────────
@@ -35,13 +38,16 @@ class LLM:
                     ],
                     response_format={"type": "json_object"},
                     temperature=config.LLM_TEMPERATURE,
+                    seed=config.LLM_SEED,
                 )
                 return json.loads(resp.choices[0].message.content)
             except json.JSONDecodeError:
+                logger.warning(f"LLM returned invalid JSON (attempt {attempt + 1}/{config.LLM_MAX_RETRIES})")
                 if attempt == config.LLM_MAX_RETRIES - 1:
                     raise ValueError("LLM returned invalid JSON after retries.")
                 time.sleep(0.5)
             except Exception as e:
+                logger.warning(f"LLM call failed (attempt {attempt + 1}/{config.LLM_MAX_RETRIES}): {e}")
                 if attempt == config.LLM_MAX_RETRIES - 1:
                     raise
                 time.sleep(1)

@@ -180,16 +180,15 @@ if st.button("🚀 Rank Candidates", type="primary", use_container_width=True):
         }
         # Add dimension scores
         for dim in ("skills_coverage", "skills_depth", "project_relevance", "experience", "seniority", "education", "overall_fit"):
+            label = dim.replace("_", " ").title()
             if dim in ev.scores:
-                label = dim.replace("_", " ").title()
                 row[label] = round(ev.scores[dim].score, 1)
             else:
-                label = dim.replace("_", " ").title()
-                row[label] = "—"
+                row[label] = None  # use None, not "—" — avoids pyarrow type conflict
         table_data.append(row)
 
     df = pd.DataFrame(table_data)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
     # Export to Excel
     excel_buffer = BytesIO()

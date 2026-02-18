@@ -7,6 +7,7 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = "openai/gpt-oss-120b"       # 120B, 500 tok/s — used for parsing + evaluation
 LLM_TEMPERATURE = 0
+LLM_SEED = 42                            # fixed seed for reproducible outputs
 LLM_MAX_RETRIES = 3
 
 # --- Embeddings ---

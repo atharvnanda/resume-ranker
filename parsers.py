@@ -3,11 +3,14 @@ parsers.py — PDF text extraction and LLM-based structured extraction.
 Handles both Job Descriptions (pasted text) and Resume PDFs.
 """
 from __future__ import annotations
+import logging
 import pdfplumber
 
 import config
 from models import JobRequirements, CandidateProfile
 from utils import LLM
+
+logger = logging.getLogger(__name__)
 
 
 # ── PDF Text Extraction ─────────────────────────────────────────────────
@@ -18,10 +21,16 @@ def extract_text_from_pdf(file) -> str:
     Returns raw text or empty string on failure.
     """
     try:
+        # Reset file pointer — critical for Streamlit re-runs
+        if hasattr(file, "seek"):
+            file.seek(0)
         with pdfplumber.open(file) as pdf:
             pages = [page.extract_text() or "" for page in pdf.pages]
-        return "\n".join(pages).strip()
-    except Exception:
+        text = "\n".join(pages).strip()
+        logger.info(f"PDF extraction: {getattr(file, 'name', '?')} → {len(text)} chars, {len(pages)} pages")
+        return text
+    except Exception as e:
+        logger.error(f"PDF extraction failed for {getattr(file, 'name', '?')}: {e}")
         return ""
 
 
@@ -128,6 +137,7 @@ def parse_resume(file, llm: LLM) -> CandidateProfile:
     raw_text = extract_text_from_pdf(file)
 
     if len(raw_text) < config.MIN_RESUME_TEXT_LENGTH:
+        logger.warning(f"Resume too short to parse: {filename} ({len(raw_text)} chars)")
         return CandidateProfile(
             name="UNPARSEABLE",
             source_file=filename,
@@ -138,7 +148,10 @@ def parse_resume(file, llm: LLM) -> CandidateProfile:
     try:
         data = llm.extract_json(RESUME_SYSTEM_PROMPT, raw_text)
         profile = CandidateProfile(**data)
-    except Exception:
+        logger.info(f"Parsed {filename}: {profile.name}, {len(profile.skills)} skills, "
+                     f"{len(profile.experience)} exp entries, {len(profile.education)} edu entries")
+    except Exception as e:
+        logger.error(f"LLM parse failed for {filename}: {e}")
         profile = CandidateProfile(name="PARSE_ERROR")
 
     profile.source_file = filename
