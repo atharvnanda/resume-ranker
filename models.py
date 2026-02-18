@@ -4,7 +4,7 @@ from typing import Optional
 
 
 class SafeBase(BaseModel):
-    """Base that coerces None → default for list/dict fields (LLMs love returning null)."""
+    """Base that coerces None → default for list/dict/str fields (LLMs love returning null)."""
 
     @model_validator(mode="before")
     @classmethod
@@ -13,12 +13,17 @@ class SafeBase(BaseModel):
             return values
         for name, field in cls.model_fields.items():
             if name in values and values[name] is None:
-                if hasattr(field.annotation, "__origin__"):
-                    origin = field.annotation.__origin__
-                    if origin is list:
-                        values[name] = []
-                    elif origin is dict:
-                        values[name] = {}
+                annotation = field.annotation
+                # Handle Optional[X] — unwrap to X
+                origin = getattr(annotation, "__origin__", None)
+                if origin is list:
+                    values[name] = []
+                elif origin is dict:
+                    values[name] = {}
+                elif annotation is str:
+                    values[name] = ""
+                elif annotation is float or annotation is int:
+                    values[name] = 0
         return values
 
 
