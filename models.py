@@ -61,6 +61,13 @@ class ExperienceEntry(SafeBase):
     responsibilities: list[str] = Field(default_factory=list)
 
 
+class ProjectEntry(SafeBase):
+    name: str = ""
+    description: str = ""
+    technologies: list[str] = Field(default_factory=list)
+    url: str = ""
+
+
 class EducationEntry(SafeBase):
     degree: str = ""
     field: str = ""
@@ -77,6 +84,7 @@ class CandidateProfile(SafeBase):
     current_title: str = ""
     skills: list[str] = Field(default_factory=list)
     experience: list[ExperienceEntry] = Field(default_factory=list)
+    projects: list[ProjectEntry] = Field(default_factory=list)
     education: list[EducationEntry] = Field(default_factory=list)
     certifications: list[str] = Field(default_factory=list)
     source_file: str = ""  # original PDF filename

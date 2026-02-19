@@ -89,6 +89,14 @@ Given raw resume text, extract the following as a JSON object — nothing else.
       "responsibilities": ["did X", "built Y"]
     }
   ],
+  "projects": [
+    {
+      "name": "project name",
+      "description": "what the project does and what the candidate built/contributed",
+      "technologies": ["React", "Node.js", "MongoDB"],
+      "url": "github or live link or null"
+    }
+  ],
   "education": [
     {
       "degree": "B.S.",
@@ -99,6 +107,14 @@ Given raw resume text, extract the following as a JSON object — nothing else.
   ],
   "certifications": ["AWS SAA", "PMP"]
 }
+
+CRITICAL rules for project extraction:
+- Extract EVERY project mentioned in the resume — personal projects, academic projects, freelance work, open-source contributions, hackathon projects.
+- Projects are typically listed under "Projects", "Personal Projects", "Academic Projects", "Side Projects", or similar headings.
+- Do NOT confuse work experience with projects. Job roles go in "experience", standalone projects go in "projects".
+- If a significant system/product was built as part of a job AND is described in enough detail to stand alone, include it in BOTH experience responsibilities AND as a separate project.
+- For each project, extract ALL technologies used — look for tech mentioned in the description, tags, or brackets like [React, Node.js].
+- The description should capture WHAT was built and WHAT the candidate's role/contribution was.
 
 CRITICAL rules for skill extraction:
 - Extract EVERY technology, tool, language, framework, library, database, concept, and methodology mentioned ANYWHERE in the resume — not just the skills section.

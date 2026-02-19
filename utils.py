@@ -133,7 +133,7 @@ def _substring_match(required: str, candidate_skill: str) -> bool:
 def build_search_pool(candidate) -> list[str]:
     """
     Build a broad pool of matchable strings from a candidate profile.
-    Includes skills, certifications, responsibilities, titles, and raw text fragments.
+    Includes skills, certifications, experience, projects, and raw text fragments.
     This ensures we don't miss skills the LLM forgot to extract.
     """
     pool = list(candidate.skills)
@@ -141,6 +141,13 @@ def build_search_pool(candidate) -> list[str]:
     pool += [exp.title for exp in candidate.experience if exp.title]
     for exp in candidate.experience:
         pool += exp.responsibilities
+    # Include project technologies and descriptions
+    for proj in getattr(candidate, "projects", []):
+        if proj.name:
+            pool.append(proj.name)
+        if proj.description:
+            pool.append(proj.description)
+        pool += proj.technologies
     # Add raw text split into meaningful chunks (lines) as fallback
     if candidate.raw_text:
         lines = [line.strip() for line in candidate.raw_text.split("\n") if len(line.strip()) > 10]

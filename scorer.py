@@ -18,9 +18,9 @@ from utils import LLM, Embedder, skill_matches, build_search_pool, compute_skill
 # ── LLM Evaluation Prompt ────────────────────────────────────────────────
 
 EVAL_SYSTEM_PROMPT = """\
-You are a strict technical hiring evaluator. You will be given a job description, a candidate's resume, and a PRE-COMPUTED skills checklist showing which required skills were found or missing.
+You are a strict technical hiring evaluator. You will be given a job description, a candidate's full work history (jobs AND projects merged together), and a PRE-COMPUTED skills checklist.
 
-Your job is to evaluate the candidate's DEPTH of demonstrated skill usage and project relevance — NOT to re-check whether skills are present (that's already done deterministically).
+Your job is to evaluate the candidate's DEPTH of skill usage and the relevance of their TOTAL WORK (jobs + projects combined) to this specific role.
 
 Return a JSON object with this exact structure — nothing else:
 {
@@ -45,71 +45,79 @@ Return a JSON object with this exact structure — nothing else:
 IMPORTANT: You are given a pre-computed checklist of which required skills are PRESENT or MISSING.
 Use it as ground truth. Do NOT override it. A candidate missing 5 out of 9 required skills CANNOT score above 40.
 
-Measure these 3 factors (since coverage is already computed separately):
+Measure these 3 factors (coverage is already computed separately):
 
 A. DEMONSTRATED USE (0-35): Are the PRESENT skills backed by real work, or just listed?
-   - 35 = every present skill appears in project/work descriptions with specific outcomes
+   - 35 = every present skill appears in [JOB] or [PROJECT] entries with specific outcomes
    - 20 = most present skills mentioned in context of actual work
    - 10 = skills are only listed in a skills section with no supporting work evidence
    - 0 = skills not demonstrated at all
 
-B. DEPTH (0-35): For the skills that ARE present, does usage show surface-level or deep knowledge?
-   - 35 = advanced patterns (architecture decisions, performance optimization, scaling, leading teams)
-   - 20 = solid intermediate use (built features end-to-end, integrated systems, solved real problems)
+B. DEPTH (0-35): For the skills that ARE present, does usage show deep knowledge?
+   - 35 = advanced patterns (architecture decisions, performance optimization, scaling)
+   - 20 = solid intermediate use (built features end-to-end, integrated systems)
    - 10 = basic use (tutorials, simple CRUD, academic coursework only)
    - 0 = no evidence of actual hands-on use
 
-C. RECENCY (0-30): Were the present skills used in recent roles?
-   - 30 = used in current/most recent role
+C. RECENCY (0-30): Were the present skills used in recent work?
+   - 30 = used in current/most recent [JOB] or recent [PROJECT]
    - 20 = used in last 2-3 years
    - 10 = used only in older roles (3+ years ago)
    - 0 = cannot determine when used
 
 CRITICAL: If the skills checklist shows many required skills MISSING, this dimension MUST score low.
-A candidate missing Node.js and Python for a Full Stack role requiring both CANNOT score above 30 on skills_depth.
 
-═══ DIMENSION 2: project_relevance (How relevant is their ACTUAL WORK to THIS specific job?) ═══
+═══ DIMENSION 2: project_relevance (How relevant is the candidate's TOTAL WORK to THIS role?) ═══
 
-"Projects" includes work done at previous employers, side projects, open-source contributions — any demonstrated work.
+You are given a merged list of ALL the candidate's work, tagged as [JOB] or [PROJECT].
+Evaluate ALL of them together — jobs AND projects both count equally.
 
-Measure these 4 factors, then average them into one score:
+Measure these 4 factors, then average into one score:
 
-A. DOMAIN MATCH (0-25): Does their project domain match the job's domain?
-   - 25 = same domain (e.g. both are web apps, both are fintech)
+A. DOMAIN MATCH (0-25): Is their work in a similar domain as this role?
+   - 25 = same domain (e.g. both are web apps, both are SaaS platforms)
    - 15 = related domain
    - 5 = different but transferable
    - 0 = completely unrelated
 
-B. TECH STACK OVERLAP (0-25): Do their projects use the same technologies the job requires?
-   - 25 = projects use most/all of the required tech stack
-   - 15 = projects use some of the required tech stack
-   - 5 = projects use different but related technologies
+B. TECH STACK OVERLAP (0-25): Does their work use the technologies this JD requires?
+   Look at BOTH [JOB] responsibilities AND [PROJECT] technologies.
+   - 25 = work uses most/all of the required tech stack
+   - 15 = work uses some of the required tech stack
+   - 5 = different but related technologies
    - 0 = no overlap at all
 
-C. COMPLEXITY (0-25): How complex are their projects?
-   - 25 = production systems, multi-service architectures, real user traffic
-   - 15 = complete applications with multiple features, CI/CD, deployment
+C. COMPLEXITY & SCALE (0-25): How complex is their demonstrated work?
+   - 25 = production systems, multi-service architectures, real users
+   - 15 = complete applications with multiple features, deployment
    - 5 = simple apps, single-feature projects, coursework
-   - 0 = no projects found
+   - 0 = no substantial work found
 
-D. IMPACT (0-25): Did the projects produce measurable results?
-   - 25 = quantified impact (users served, performance improved, revenue generated)
-   - 15 = clear impact described but not quantified
-   - 5 = impact unclear or minimal
+D. IMPACT & OWNERSHIP (0-25): Did they build/own/lead, or just participate?
+   - 25 = quantified impact, led development, owned systems end-to-end
+   - 15 = clear contributions described but not quantified
+   - 5 = participation described vaguely
    - 0 = no impact described
 
-═══ DIMENSION 3: overall_fit (Holistic assessment as a tiebreaker) ═══
+CRITICAL RULES:
+- If the candidate has NO [JOB] entries AND NO [PROJECT] entries, score 0-10.
+- If work exists but uses NONE of the required technologies, score 10-30.
+- If some work uses some required tech, score 30-60.
+- If multiple items closely match the role's tech stack and domain, score 60-85.
+- Only score 85+ if work demonstrates production-level systems with the exact required stack.
 
-Consider everything together — skills coverage (from the checklist), depth, projects, experience trajectory, preferred/nice-to-have criteria, certifications.
-Score 0-100. This should roughly correlate with the other scores — do NOT give a high overall_fit if skills_depth and project_relevance are low.
+═══ DIMENSION 3: overall_fit (Holistic tiebreaker) ═══
+
+Consider everything together — skills coverage, depth, work relevance, experience trajectory, preferred criteria, certifications.
+Score 0-100. This should correlate with the other scores — do NOT give a high overall_fit if skills_depth and project_relevance are low.
 
 ═══ RULES ═══
-- Base scores ONLY on what is explicitly written in the resume. Do NOT assume or infer skills not mentioned.
-- If a required skill is MISSING from the checklist, treat it as genuinely absent — do not give credit for it.
-- If a skill is only listed but never demonstrated in projects or work, score it under DEMONSTRATED USE as 10, not 35.
-- Be harsh and consistent: a frontend-only developer applying for a full-stack role with Node.js + Python required should score LOW on skills_depth if those backend skills are missing.
-- strengths: list 2-4 specific things that make this candidate stand out for THIS role.
-- gaps: list 2-4 specific things missing or weak relative to THIS role's requirements.
+- Base scores ONLY on what is explicitly written. Do NOT assume or infer.
+- If a required skill is MISSING from the checklist, treat it as genuinely absent.
+- If a skill is only listed but never demonstrated in [JOB] or [PROJECT], score DEMONSTRATED USE as 10, not 35.
+- Be harsh and consistent.
+- strengths: list 2-4 specific things for THIS role. Cite actual [JOB] or [PROJECT] entries.
+- gaps: list 2-4 specific things missing or weak for THIS role.
 """
 
 
@@ -119,8 +127,11 @@ def _build_eval_prompt(
     matched_skills: list[str],
     missing_skills: list[str],
 ) -> str:
-    """Build the user prompt for LLM evaluation, including pre-computed skills checklist."""
-    # Format JD requirements concisely
+    """Build the user prompt for LLM evaluation.
+    Merges experience + projects into one unified 'All Work' section so the LLM
+    can evaluate project_relevance based on everything the candidate has done."""
+
+    # JD summary
     jd_section = f"""JOB: {job.title} ({job.seniority_level} level)
 Summary: {job.summary}
 Required skills: {', '.join(job.hard.required_skills) or 'None specified'}
@@ -128,20 +139,48 @@ Min experience: {job.hard.min_experience_years} years
 Preferred skills: {', '.join(job.preferred.preferred_skills) or 'None'}
 Preferred certs: {', '.join(job.preferred.preferred_certifications) or 'None'}"""
 
-    # Pre-computed skills checklist — the LLM must treat this as ground truth
+    # Pre-computed skills checklist
     total = len(matched_skills) + len(missing_skills)
-    checklist = f"""
-═══ PRE-COMPUTED SKILLS CHECKLIST ({len(matched_skills)}/{total} required skills found) ═══
+    checklist = f"""═══ PRE-COMPUTED SKILLS CHECKLIST ({len(matched_skills)}/{total} required skills found) ═══
 ✅ FOUND: {', '.join(matched_skills) if matched_skills else 'None'}
 ❌ MISSING: {', '.join(missing_skills) if missing_skills else 'None'}
 (This checklist was computed deterministically. Treat it as ground truth.)"""
 
-    # Send the full resume text — let the LLM read everything
+    # Build unified work section — merge jobs + projects with clear tags
+    work_items = []
+    for exp in candidate.experience:
+        header = exp.title
+        if exp.company:
+            header += f" at {exp.company}"
+        if exp.duration_years:
+            header += f" ({exp.duration_years}y)"
+        bullets = "\n".join(f"  - {r}" for r in exp.responsibilities) if exp.responsibilities else "  - No details provided"
+        work_items.append(f"[JOB] {header}\n{bullets}")
+
+    for proj in candidate.projects:
+        tech = f" [{', '.join(proj.technologies)}]" if proj.technologies else ""
+        desc = proj.description or "No description provided"
+        url = f" | {proj.url}" if proj.url else ""
+        work_items.append(f"[PROJECT] {proj.name}{tech}{url}\n  - {desc}")
+
+    work_section = "\n\n".join(work_items) if work_items else "No work experience or projects found."
+
+    # Candidate summary
+    candidate_info = f"""═══ CANDIDATE: {candidate.name} ═══
+Current Title: {candidate.current_title or 'Not specified'}
+Total Experience: {candidate.total_experience_years} years
+Skills: {', '.join(candidate.skills) or 'None extracted'}
+Education: {', '.join(f'{e.degree} {e.field} — {e.institution}' for e in candidate.education) or 'None'}
+Certifications: {', '.join(candidate.certifications) or 'None'}"""
+
     return f"""{jd_section}
+
 {checklist}
 
-═══ CANDIDATE RESUME ═══
-{candidate.raw_text}"""
+{candidate_info}
+
+═══ ALL WORK (Jobs + Projects merged) ═══
+{work_section}"""
 
 
 def llm_evaluate(
